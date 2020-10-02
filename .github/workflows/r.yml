@@ -1,0 +1,76 @@
+st_train=read.csv("store_train.csv",stringsAsFactors=F)
+bf_test=read.csv("bank-full_test.csv",stringsAsFactors=F)
+bf_train$data="train"
+bf_test$y=NA
+bf_test$data="test"
+bf_train$y=as.numeric(bf_train$y=="yes")
+bf=rbind(bf_train,bf_test)
+> char_cols=names(bf)[sapply(bf, function(x) is.character(x))]
+> char_cols
+CreateDummies=function(data,var,freq_cutoff=0){
+t=table(data[,var])
+t=t[t>freq_cutoff]
+t=sort(t)
+categories=names(t)[-1]
+for( cat in categories){
+name=paste(var,cat,sep="_")
+name=gsub(" ","",name)
+name=gsub("-","_",name)
+name=gsub("\\?","Q",name)
+name=gsub("<","LT_",name)
+name=gsub("\\+","",name)
+name=gsub(",","",name)
+name=gsub("(","",name,fixed=TRUE)
+name=gsub(")","",name,fixed=TRUE)
+data[,name]=as.numeric(data[,var]==cat)
+}
+data[,var]=NULL
+return(data)
+}
+cat_var
+[1] "countyname"     "storecode"      "Areaname"       "countytownname"
+[5] "state_alpha"    "store_Type"    
+for (var in cat_var){
+st=CreateDummies(st,var,50)
+}
+param=list(mtry=c(5,10,15,20,25,35),ntree=c(50,100,200,500,700), maxnodes=c(5,10,15,20,30,50,100), nodesize=c(1,2,5,10))
+mycost_auc=function(store,storehat){
+roccurve=pROC::roc(store,storehat)
+score=pROC::auc(roccurve)
+return(score)
+}
+subset_paras=function(full_list_para,n=10){
+all_comb=expand.grid(full_list_para)
+s=sample(1:nrow(all_comb),n)
+subset_para=all_comb[s,]
+return(subset_para)
+}
+for (col in names(st)){
+if (sum(is.na(st[,col]))>0 & !(col %in% c("data","store"))){
+st[is.na(st[,col]),col]=mean(st[st$data=="train",col],na.rm=T)
+}
+}
+st_train=st %>% filter(data=="train")%>% select(-data)
+st_test=st%>% filter(data=="test") %>% select(-data)
+num_trials=50
+my_params=subset_paras(param,num_trials)
+myauc=0
+for (i in 1:num_trials){
+print(paste("starting interation:",i))
+params=my_params[i,]
+k=cvTuning(randomForest,store~.,data=st_train,tuning=params, folds=cvFolds(nrow(st_train),K=10,type="random"), cost= mycost_auc,seed =2, predictArgs= list(type="prob"))
+score.this=k$cv[,2]
+if (score.this>myauc){
+print(params)
+myauc=score.this
+best_params=params
+}
+}
+st.rf.final=randomForest(store~.,mtry=best_params$mtry, ntree=best_params$ntree, maxnodes=best_params$maxnodes, nodesize=best_params$nodesize, data=st_train)
+test.score=predict(st.rf.final,newdata=st_test,type="prob")[,2]
+View(test.score)
+write.csv(test.score,"mysubmission03092020.csv")
+
+
+
+
